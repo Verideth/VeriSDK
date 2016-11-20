@@ -17,8 +17,6 @@ VeriSDK::Panel* panel;
 VeriSDK::Engine* engine;
 VeriSDK::IFTools* tools = new VeriSDK::IFTools;
 
-unsigned long tahoma;
-
 VeriSDK::Surface* surf = (VeriSDK::Surface*)tools->IFInfo("vguimatsurface.dll", "VGUI_Surface031");
 
 class Render
