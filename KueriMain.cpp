@@ -100,7 +100,7 @@ void __stdcall CreateMove(int sequence_number, float input_sample_frametime, boo
 	int nLocalPlayerID = engine->GetLocalPlayer();
 	VeriSDK::ClientEntity* pLocal = static_cast<VeriSDK::ClientEntity*>(entList->GetClientEntity(nLocalPlayerID));
 
-	if (cmd->buttons & IN_JUMP && !(pLocal->GetFlags() & FL_ONGROUND))
+	if (cmd->buttons & IN_JUMP && !(pLocal->GetFlags() & FL_ONGROUND)) // added this to prove that createmove is working
 	{
 		engine->SetViewAngles(VeriSDK::Vector(25, 0, 25));
 	}
