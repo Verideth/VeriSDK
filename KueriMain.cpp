@@ -7,7 +7,6 @@
 #include <chrono>
 #include <shlwapi.h>			
 #include <math.h>
-#include "checksum_crc.h"
 
 #include "KueriSDK.h"
 
