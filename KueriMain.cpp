@@ -6,17 +6,25 @@
 #include <thread>
 #include <chrono>
 #include <shlwapi.h>			
+#include <math.h>
+#include "checksum_crc.h"
 
-#include "SDK.h"
+#include "KueriSDK.h"
 
 CVMTHookManager* panelVMT;
+CVMTHookManager* engineVMT;
+CVMTHookManager* clientModeVMT;
 
-hkPaintTraverse paintTraverseHook;
+fnPaintTraverse paintTraverseHook;
+fnCreateMove createMoveHook;
+
+VeriSDK::Input* input;
 
 VeriSDK::Panel* panel;
-VeriSDK::Engine* engine;
-VeriSDK::IFTools* tools = new VeriSDK::IFTools;
 
+unsigned long tahoma;
+
+VeriSDK::ClientEntityList* entList;
 VeriSDK::Surface* surf = (VeriSDK::Surface*)tools->IFInfo("vguimatsurface.dll", "VGUI_Surface031");
 
 class Render
@@ -73,7 +81,28 @@ void __stdcall PaintTraverse(int vguiID, bool force, bool allowForcing)
 
 	if (!strcmp("FocusOverlayPanel", panel->GetName(vguiID)))
 	{
-		render->DrawString1(50, 50, Color(255, 0, 255, 255), 20, "Hello, world!\n");
+		render->DrawString1(10, 10, Color(255, 25, 255, 255), 24, "K");
+		render->DrawString1(30, 10, Color(25, 50, 255, 255), 24, "u");
+		render->DrawString1(50, 10, Color(25, 255, 255, 255), 24, "e");
+		render->DrawString1(70, 10, Color(255, 255, 255, 255), 24, "r");
+		render->DrawString1(90, 10, Color(25, 25, 25, 255), 24, "i");
+	}
+}
+
+void __stdcall CreateMove(int sequence_number, float input_sample_frametime, bool active)
+{
+	createMoveHook(clientMode, sequence_number, input_sample_frametime, active);
+	VeriSDK::UserCmd* cmdlist = *reinterpret_cast<VeriSDK::UserCmd**>(DWORD(input) + 0xEC);
+	VeriSDK::UserCmd* cmd = &cmdlist[sequence_number % 150];
+	
+	/* BHOP */
+	//something is definetely wrong with hooking
+	int nLocalPlayerID = engine->GetLocalPlayer();
+	VeriSDK::ClientEntity* pLocal = static_cast<VeriSDK::ClientEntity*>(entList->GetClientEntity(nLocalPlayerID));
+
+	if (cmd->buttons & IN_JUMP && !(pLocal->GetFlags() & FL_ONGROUND))
+	{
+		engine->SetViewAngles(VeriSDK::Vector(25, 0, 25));
 	}
 }
 
@@ -85,26 +114,42 @@ void Init()
 	freopen("CONOUT$", "w", stdout);
 	freopen("CONOUT$", "w", stderr);
 
-	SetConsoleTitle("Veriscript 3.0");
+	SetConsoleTitle("Kueri");
 
-	std::cout << "Welcome to Veriscript 3.0" << std::endl;
+	std::cout << "Welcome to Kueri" << std::endl;
+
+	// Got this from dude aswell.
 
 	std::cout << "Gathering interfaces!" << std::endl;
 
+	clientMode = static_cast<VeriSDK::BaseClientDLL*>(tools->IFInfo("client.dll", "VClient018"));
 	engine = (VeriSDK::Engine*)tools->IFInfo("engine.dll", "VEngineClient014");
 	panel = (VeriSDK::Panel*)tools->IFInfo("vgui2.dll", "VGUI_Panel009");
+	entList = (VeriSDK::ClientEntityList*)tools->IFInfo("client.dll", "VClientEntityList003");
+	input = *reinterpret_cast<VeriSDK::Input**>((*reinterpret_cast<DWORD**>(clientMode))[15] + 0x1);
+	
+	panelVMT = new CVMTHookManager((DWORD**)panel);
+	engineVMT = new CVMTHookManager((DWORD**)engine);
+	clientModeVMT = new CVMTHookManager((DWORD**)clientMode);
 
 	std::cout << "Hooking paint traverse..." << std::endl;
 
-	panelVMT = new CVMTHookManager((DWORD**)panel);
+	paintTraverseHook = (fnPaintTraverse)panelVMT->HookMethod((DWORD)PaintTraverse, 41);
 
-	paintTraverseHook = (hkPaintTraverse)panelVMT->HookMethod((DWORD)PaintTraverse, 41);	
+	std::cout << "Hooking create move..." << std::endl;
+
+	createMoveHook = (fnCreateMove)clientModeVMT->HookMethod((DWORD)CreateMove, 21);
 
 	if (paintTraverseHook)
 	{
 		std::cout << "Painthook was hooked successfully!" << std::endl;
 	}
 
+	if (createMoveHook)
+	{
+		std::cout << "Createmove was hooked successfully!" << std::endl;
+	}
+	
 	return;
 }
 
@@ -116,5 +161,6 @@ BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved)
 		CreateThread(0, 0, (LPTHREAD_START_ROUTINE)Init, 0, 0, 0);
 		break;
 	}
+
 	return 1;
 }
