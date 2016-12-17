@@ -5,8 +5,12 @@
 
 #define WIN32_LEAN_AND_MEAN
 
+#define MAXSTUDIOSKINS 32
+
 typedef unsigned int uint32;
 typedef float vec_t;
+
+#define TEXTURE_GROUP_MODEL	"Model textures"
 
 vec_t BitsToFloat(uint32 i)
 {
@@ -56,7 +60,7 @@ inline bool IsFinite(const vec_t &f)
 #endif
 #endif
 
-typedef unsigned short MaterialHandle_t;
+typedef unsigned short MaterialHandle;
 
 enum VeriFontFlags
 {
@@ -75,7 +79,49 @@ enum VeriFontFlags
 	FONTFLAG_BITMAP = 0x800,
 };
 
-typedef void* (*Interface)(char* name, int returnVal);
+enum OverrideType
+{
+	OVERRIDE_NORMAL = 0,
+	OVERRIDE_BUILD_SHADOWS,
+	OVERRIDE_DEPTH_WRITE,
+	OVERRIDE_SSAO_DEPTH_WRITE,
+};
+
+enum MaterialVarFlags
+{
+	MATERIAL_VAR_DEBUG = (1 << 0),
+	MATERIAL_VAR_NO_DEBUG_OVERRIDE = (1 << 1),
+	MATERIAL_VAR_NO_DRAW = (1 << 2),
+	MATERIAL_VAR_USE_IN_FILLRATE_MODE = (1 << 3),
+	MATERIAL_VAR_VERTEXCOLOR = (1 << 4),
+	MATERIAL_VAR_VERTEXALPHA = (1 << 5),
+	MATERIAL_VAR_SELFILLUM = (1 << 6),
+	MATERIAL_VAR_ADDITIVE = (1 << 7),
+	MATERIAL_VAR_ALPHATEST = (1 << 8),
+	MATERIAL_VAR_ZNEARER = (1 << 10),
+	MATERIAL_VAR_MODEL = (1 << 11),
+	MATERIAL_VAR_FLAT = (1 << 12),
+	MATERIAL_VAR_NOCULL = (1 << 13),
+	MATERIAL_VAR_NOFOG = (1 << 14),
+	MATERIAL_VAR_IGNOREZ = (1 << 15),
+	MATERIAL_VAR_DECAL = (1 << 16),
+	MATERIAL_VAR_ENVMAPSPHERE = (1 << 17), // OBSOLETE
+	MATERIAL_VAR_ENVMAPCAMERASPACE = (1 << 19), // OBSOLETE
+	MATERIAL_VAR_BASEALPHAENVMAPMASK = (1 << 20),
+	MATERIAL_VAR_TRANSLUCENT = (1 << 21),
+	MATERIAL_VAR_NORMALMAPALPHAENVMAPMASK = (1 << 22),
+	MATERIAL_VAR_NEEDS_SOFTWARE_SKINNING = (1 << 23), // OBSOLETE
+	MATERIAL_VAR_OPAQUETEXTURE = (1 << 24),
+	MATERIAL_VAR_ENVMAPMODE = (1 << 25), // OBSOLETE
+	MATERIAL_VAR_SUPPRESS_DECALS = (1 << 26),
+	MATERIAL_VAR_HALFLAMBERT = (1 << 27),
+	MATERIAL_VAR_WIREFRAME = (1 << 28),
+	MATERIAL_VAR_ALLOWALPHATOCOVERAGE = (1 << 29),
+	MATERIAL_VAR_ALPHA_MODIFIED_BY_PROXY = (1 << 30),
+	MATERIAL_VAR_VERTEXFOG = (1 << 31),
+};
+
+typedef void* (*Interface)(char* name, int returnVal); // This is supposed to be CreateInterfaceFn but whatever
 
 // credits @uc
 template<typename Function>Function getvfunc(void*_VMT, int Index)
@@ -205,6 +251,18 @@ public:
 		color[2] = b;
 		color[3] = a;
 	}
+
+	float* Base()
+	{
+		float clr[3];
+
+		clr[0] = color[0] / 255.0f;
+		clr[1] = color[1] / 255.0f;
+		clr[2] = color[2] / 255.0f;
+
+		return &clr[0];
+	}
+
 };
 
 #define FLOAT32_NAN BitsToFloat( FLOAT32_NAN_BITS )
@@ -213,6 +271,10 @@ extern class QAngleByValue;
 
 namespace VeriSDK
 {
+	struct model_t;
+	typedef unsigned short ModelInstanceHandle_t;
+	typedef float matrix3x4_t[3][4];
+
 	class QAngle
 	{
 	public:
@@ -222,12 +284,12 @@ namespace VeriSDK
 		// Construction/destruction
 		QAngle(void)
 		{
-		#ifdef _DEBUG
-		#ifdef VECTOR_PARANOIA
+#ifdef _DEBUG
+#ifdef VECTOR_PARANOIA
 			// Initialize to NAN to catch errors
 			x = y = z = VEC_T_NAN;
-		#endif
-		#endif
+#endif
+#endif
 		}
 
 		QAngle(vec_t X, vec_t Y, vec_t Z)
@@ -251,7 +313,7 @@ namespace VeriSDK
 			x = minVal + ((float)rand() / VALVE_RAND_MAX) * (maxVal - minVal);
 			y = minVal + ((float)rand() / VALVE_RAND_MAX) * (maxVal - minVal);
 			z = minVal + ((float)rand() / VALVE_RAND_MAX) * (maxVal - minVal);
-		}	
+		}
 
 		// Got any nasty NAN's?
 		bool IsValid()
@@ -364,6 +426,25 @@ namespace VeriSDK
 		float LengthSqr(void) { return (x*x + y*y + z*z); }
 	};
 
+	class Material
+	{
+	public:
+		void SetMaterialVarFlag(MaterialVarFlags flag, bool on) // doesnt work
+		{
+			typedef void(__thiscall* fnMaterialVarFlag)(void*, MaterialVarFlags, bool);
+
+			return getvfunc<fnMaterialVarFlag>(this, 29)(this, flag, on);
+		}
+
+		void AlphaModulate(float alpha)
+		{
+			typedef void(__thiscall* fnAlphaModulate)(void*, float);
+
+			return getvfunc<fnAlphaModulate>(this, 27)(this, alpha);
+		}
+	};
+
+
 	class Surface
 	{
 	public:
@@ -451,6 +532,114 @@ namespace VeriSDK
 		}
 	};
 
+	struct studiohdr_t
+	{
+		int id;
+		int version;
+		int checksum;
+		char name[64];
+		int length;
+		Vector eyeposition;
+		Vector illumposition;
+		Vector hull_min;
+		Vector hull_max;
+		Vector view_bbmin;
+		Vector view_bbmax;
+		int flags;
+		int numbones;
+		int boneindex;
+		//	inline mstudiobone_t *pBone(int i) const { Assert(i >= 0 && i < numbones); return (mstudiobone_t *)(((byte *)this) + boneindex) + i; };
+		int numbonecontrollers;
+		int bonecontrollerindex;
+		int numhitboxsets;
+		int hitboxsetindex;
+		int numlocalanim;
+		int localanimindex;
+		int numlocalseq;
+		int localseqindex;
+		mutable int activitylistversion;
+		mutable int eventsindexed;
+		int numtextures;
+		int textureindex;
+		int numcdtextures;
+		int cdtextureindex;
+		int numskinref;
+		int numskinfamilies;
+		int skinindex;
+		int numbodyparts;
+		int bodypartindex;
+		int numlocalattachments;
+		int localattachmentindex;
+		int numlocalnodes;
+		int localnodeindex;
+		int localnodenameindex;
+		int numflexdesc;
+		int flexdescindex;
+		int numflexcontrollers;
+		int flexcontrollerindex;
+		int numflexrules;
+		int flexruleindex;
+		int numikchains;
+		int ikchainindex;
+		int nummouths;
+		int mouthindex;
+		int numlocalposeparameters;
+		int localposeparamindex;
+		int surfacepropindex;
+		int keyvalueindex;
+		int keyvaluesize;
+		int numlocalikautoplaylocks;
+		int localikautoplaylockindex;
+		float mass;
+		int contents;
+		int numincludemodels;
+		int includemodelindex;
+		mutable void* virtualModel;
+		int szanimblocknameindex;
+		int numanimblocks;
+		int animblockindex;
+		mutable void* animblockModel;
+		int bonetablebynameindex;
+		void* pVertexBase;
+		void* pIndexBase;
+		byte constdirectionallightdot;
+		byte rootLOD;
+		byte numAllowedRootLODs;
+		byte unused[1];
+		int unused4;
+		int numflexcontrollerui;
+		int flexcontrolleruiindex;
+		float flVertAnimFixedPointScale;
+		int unused3[1];
+		int studiohdr2index;
+		int unused2[1];
+	};
+
+	class ModelInfo
+	{
+	public:
+		const char* GetModelName(const model_t* modelName)
+		{
+			typedef const char*(__thiscall* fnGetModelName)(void*, const model_t*);
+
+			return getvfunc<fnGetModelName>(this, 3)(this, modelName);
+		}
+
+		studiohdr_t* GetStudiomodel(const model_t* mod) 
+		{
+			typedef studiohdr_t*(__thiscall* fnStudiomodel)(void*, const model_t*);
+
+			return getvfunc<fnStudiomodel>(this, 28)(this, mod);
+		}
+
+		void GetModelMaterials(const model_t* model, int count, Material** mat)
+		{
+			typedef void(__thiscall* fnGetModelMaterials)(void*, const model_t*, int, Material**);
+
+			return getvfunc<fnGetModelMaterials>(this, 18)(this, model, count, mat);
+		}
+	};
+
 	class Engine
 	{
 	public:
@@ -476,17 +665,6 @@ namespace VeriSDK
 		}
 	};
 
-	class BaseClientDLL
-	{
-	public:
-		void CreateMove(int sequence_number, float frametime, bool active)
-		{
-			typedef void(__thiscall* fnMove)(void*, int, float, bool);
-
-			return getvfunc<fnMove>(this, 21)(this, sequence_number, frametime, active);
-		}
-	};
-
 	class UserCmd
 	{
 	public:
@@ -503,6 +681,59 @@ namespace VeriSDK
 		short mousedx;
 		short mousedy;
 		bool hasBeenPredicted;
+	};
+
+	class ViewSetup
+	{
+	public:
+		int x;
+		int x_old;
+		int y;
+		int y_old;
+		int width;
+		int	width_old;
+		int height;
+		int	height_old;
+		float fov;
+		float fovViewmodel;
+		Vector origin;
+		QAngle angles;
+		float fNear;
+		float fFar;
+		float nearViewmodel;
+		float farViewmodel;
+		float aspectRatio;
+		float nearBlurDepth;
+		float nearFocusDepth;
+		float farFocusDepth;
+		float farBlurDepth;
+		float nearBlurRadius;
+		float farBlurRadius;
+		float doFQuality;
+		int motionBlurMode;
+		int edgeBlur;
+	};
+
+	class BaseClientDLL
+	{
+	public:
+		bool GetPlayerView(ViewSetup& playerView)
+		{
+			typedef bool(__thiscall* fnPlyView)(void*, ViewSetup&);
+
+			return getvfunc<fnPlyView>(this, 58)(this, playerView);
+		}
+	};
+	
+	class RenderView
+	{
+	public:
+		void SetColorModulation(float const* blend)
+		{
+			typedef void(__thiscall* fnColorModulation)(void*, float const*);
+
+			return getvfunc<fnColorModulation>(this, 28)(this, blend);
+		}
 	};
 
 	class VerifiedUserCmd
@@ -524,49 +755,215 @@ namespace VeriSDK
 		VerifiedUserCmd* verifiedCommands;
 	};
 
-	class ClientEntity
+	struct mstudiobone_t;
+
+	class BasePlayer
+	{
+
+	};
+
+	class BaseEntity
 	{
 	public:
-		Vector GetOrigin()
+		typedef int(__thiscall* fnGetTeam)(void*);
+		typedef void(__thiscall* fnRenderBounds)(void*, Vector&, Vector&);
+		typedef bool(__thiscall* fnAlive)(void*);
+
+		void GetRenderBounds(Vector& min, Vector& max)
 		{
-			return *reinterpret_cast<Vector*>((DWORD)this + (DWORD)0x134);
+			void* renderable = (PVOID)(this + 0x4);
+
+			return getvfunc<fnRenderBounds>(this, 20)(renderable, min, max);
 		}
 
-		int GetTeamNum()
+		bool IsAlive()
 		{
-			return *reinterpret_cast<int*>((DWORD)this + (DWORD)0xF0);
+			return getvfunc<fnAlive>(this, 200)(this);
+		}
+
+		bool IsPlayer()
+		{
+			typedef bool(__thiscall* fnPlayer)(void*);
+
+			return getvfunc<fnPlayer>(this, 202)(this);
+		}
+
+		bool IsDormant()
+		{
+			return *(bool*)((DWORD)this + 0xE9);
+		}
+
+		model_t* GetModel()
+		{
+			return *(model_t**)((DWORD)this + 0x6C);
 		}
 
 		int GetFlags()
 		{
 			return *reinterpret_cast<int*>((DWORD)this + (DWORD)0x100);
 		}
+
+		Vector& GetVecOrigin()
+		{
+			return *(Vector*)((DWORD)this + 0x134);
+		}
+
+		QAngle& GetAbsAngles()
+		{
+			return *(QAngle*)((DWORD)this + 0x4D0C);
+		}
+
+		int GetTeam()
+		{
+			return getvfunc<fnGetTeam>(this, 124)(this);
+		}
 	};
 
-	class BasePlayer : public ClientEntity 
+	class IClientRenderable
 	{
-	
+	public:
+
+	};
+
+	class MatRenderContext
+	{
+	public:
+
+	};
+
+	struct ModelRenderInfo_t
+	{
+		Vector origin;
+		QAngle angles;
+		IClientRenderable* pRenderable;
+		const model_t *pModel;
+		const matrix3x4_t *pModelToWorld;
+		const matrix3x4_t *pLightingOffset;
+		const Vector *pLightingOrigin;
+		int flags;
+		int entity_index;
+		int skin;
+		int body;
+		int hitboxset;
+		ModelInstanceHandle_t instance;
+
+		ModelRenderInfo_t()
+		{
+			pModelToWorld = NULL;
+			pLightingOffset = NULL;
+			pLightingOrigin = NULL;
+		}
 	};
 
 	class ClientEntityList
 	{
 	public:
-		void GetHighestEntityIndex(void)
+		int GetHighestEntityIndex(void)
 		{
-			typedef void(__thiscall* fnGetHighestIndex)(void*);
+			typedef int(__thiscall* fnGetHighestIndex)(void*);
 
 			return getvfunc<fnGetHighestIndex>(this, 6)(this);
 		}
 
-		inline ClientEntity* GetClientEntity(int Index) 
+		BaseEntity* GetClientEntity(int index)
 		{
-			return getvfunc<ClientEntity*(__thiscall *)(void *, int)>(this, 3)(this, Index);
+			typedef BaseEntity*(__thiscall* fnClientEnt)(void*, int);
+
+			return getvfunc<fnClientEnt>(this, 3)(this, index);
 		}
 	};
 
-	class IMaterial
+	class DebugOverlay
 	{
+	public:
+		void AddBoxOverlay(const Vector& origin, const Vector& mins, const Vector& max, QAngle const& orientation, int r, int g, int b, int a, float duration)
+		{
+			typedef void(__thiscall* fnBoxOverlay)(void*, const Vector&, const Vector&, const Vector&, QAngle const&, int, int, int, int, float);
 
+			getvfunc<fnBoxOverlay>(this, 1)(this, origin, mins, max, orientation, r, g, b, a, duration);
+		}
+	};
+
+	class ClientMode
+	{
+	public:
+		void __fastcall OverrideView(uintptr_t ecx, uintptr_t edx, VeriSDK::ViewSetup* setup)
+		{
+			typedef void(__thiscall* fnOverrideView)(uintptr_t, VeriSDK::ViewSetup*);
+
+			getvfunc<fnOverrideView>(this, 18)(ecx, setup);
+		}
+	};
+
+	struct StudioDecalHandle_t 
+	{ 
+		int unused; 
+	};
+
+	struct studiohwdata_t;
+
+	struct DrawModelState_t
+	{
+		studiohdr_t* m_pStudioHdr;
+		studiohwdata_t*	m_pStudioHWData;
+		IClientRenderable* m_pRenderable;
+		const matrix3x4_t* m_pModelToWorld;
+		StudioDecalHandle_t	m_decals;
+		int	m_drawFlags;
+		int	m_lod;
+	};
+
+	class ModelRender
+	{
+	public:
+		void DrawModelExecute(MatRenderContext* ctx, const DrawModelState_t &state, const ModelRenderInfo_t &info, matrix3x4_t *customBoneToWorld)
+		{
+			typedef void(__thiscall* fnDrawModelExecute)(void*, MatRenderContext*, DrawModelState_t, const ModelRenderInfo_t&, matrix3x4_t*);
+
+			return getvfunc<fnDrawModelExecute>(this, 21)(this, ctx, state, info, customBoneToWorld);
+		}
+
+		void ForcedMaterialOverride(Material* newMat, OverrideType overrideType = OVERRIDE_NORMAL)
+		{
+			typedef void(__thiscall* fnMaterialOverride)(void*, Material*, OverrideType);
+
+			return getvfunc<fnMaterialOverride>(this, 1)(this, newMat, overrideType);
+		}
+	};
+
+	class MatSys
+	{
+	public:
+		Material* FindMaterial(char const* materialName, const char* textureGroupName, bool complain = true, const char* complainPrefix = NULL)
+		{
+			typedef Material*(__thiscall* fnFindMat)(void*, char const*, const char*, bool, const char*);
+
+			return getvfunc<fnFindMat>(this, 84)(this, materialName, textureGroupName, complain, complainPrefix);
+		}
+	};
+
+	class ConVar
+	{
+	public:
+		void* fnChangeCallback;
+
+		void SetValue(const char* val)
+		{
+			typedef void(__thiscall* fnConvarSetValue)(void*, const char*);
+
+			return getvfunc<fnConvarSetValue>(this, 11)(this, val);
+		}
+	};
+
+	class CVar
+	{
+	public:
+		ConVar* FindVar(const char* varName)
+		{
+			typedef ConVar*(__thiscall* fnCVarFindVar)(void*, const char*);
+
+			return getvfunc<fnCVarFindVar>(this, 14)(this, varName);
+		}
 	};
 }
 
@@ -574,8 +971,28 @@ VeriSDK::IFTools* tools = new VeriSDK::IFTools;
 
 // typedefs
 typedef void(__thiscall* fnPaintTraverse)(void*, unsigned int, bool, bool);
-typedef void(__thiscall* fnCreateMove)(void*, int, float, bool);
+typedef void(__thiscall* fnCreateMove)(void*, float, VeriSDK::UserCmd*);
+typedef void(__thiscall* fnOverrideView)(void*, VeriSDK::ViewSetup*); 
+typedef void(__thiscall* fnDrawModelExecute)(void*, VeriSDK::MatRenderContext* ctx, const VeriSDK::DrawModelState_t &state, const VeriSDK::ModelRenderInfo_t &pInfo, VeriSDK::matrix3x4_t *pCustomBoneToWorld);
 
 // had to put at the bottom for BHop and other cheats
+VeriSDK::Panel* panel;
 VeriSDK::Engine* engine;
-VeriSDK::BaseClientDLL* clientMode;
+VeriSDK::BaseClientDLL* baseClientDLL;
+VeriSDK::ClientMode* clientMode;
+VeriSDK::ModelInfo* modelInfo;
+VeriSDK::Surface* surface;
+VeriSDK::DebugOverlay* dbgOverlay;
+VeriSDK::ModelRender* mdlRender;
+VeriSDK::RenderView* renderView;
+VeriSDK::MatSys* matSys;
+VeriSDK::CVar* cVar;
+
+void ForceMaterial(VeriSDK::Material* material, Color color)
+{
+	if (material != NULL)
+	{
+		renderView->SetColorModulation(color.Base());
+		mdlRender->ForcedMaterialOverride(material);
+	}
+}
